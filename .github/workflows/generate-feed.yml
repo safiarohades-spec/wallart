@@ -1,0 +1,113 @@
+name: Generate Pinterest RSS Feed
+
+on:
+  schedule:
+    - cron: '0 */6 * * *' # Otomatis berjalan setiap 6 jam
+  workflow_dispatch: # Memunculkan tombol "Run Workflow" agar bisa dijalankan manual
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
+
+    - name: Generate feed.xml
+      run: |
+        python -c "
+        import urllib.parse
+        import random
+        from datetime import datetime
+        import os
+        import html
+
+        # 1. BACA NAMA DOMAIN DARI domain.txt
+        try:
+            with open('domain.txt', 'r') as f:
+                domain = f.read().strip()
+            if not domain.startswith('http'):
+                domain = 'https://' + domain
+        except:
+            domain = 'https://safiarohades-spec.github.io/PrintableWallArt' # Fallback domain
+
+        # 2. BACA KEYWORD DARI keyword.txt
+        try:
+            with open('keyword.txt', 'r') as f:
+                keywords = [line.strip() for line in f if line.strip()]
+        except:
+            keywords = ['printable wall art', 'boho decor']
+
+        # 3. AMBIL 40 KEYWORD ACAK (Mencegah Pinterest mendeteksi spam/bulk posting)
+        selected_keywords = random.sample(keywords, min(40, len(keywords)))
+
+        # 4. HOOK WORDS & SUFFIX (Optimasi USA Wall Art)
+        hooks = ['Printable', 'Aesthetic', 'Minimalist', 'Boho', 'Modern', 'Abstract', 'Vintage', 'Digital']
+        suffixes = ['Wall Art', 'Poster', 'Art Print', 'Digital Download', 'Decor']
+
+        rss_items = []
+        for kw in selected_keywords:
+            # Generate SEO Title
+            title = f'{random.choice(hooks)} {kw.title()} {random.choice(suffixes)}'
+            
+            # Format URL sesuai detail.html?q=keyword
+            url_kw = urllib.parse.quote(kw.replace(' ', '-').lower())
+            raw_link = f'{domain}/detail.html?q={url_kw}'
+            xml_link = html.escape(raw_link) # Escape & menjadi &amp; jika ada
+            
+            # Format Image BING (Sama dengan script.js, rasio gambar vertikal 2:3 Pinterest)
+            query_image = kw + ' wall art poster'
+            raw_img_url = f'https://tse1.mm.bing.net/th?q={urllib.parse.quote(query_image)}&w=600&h=900&c=7&rs=1&p=0&dpr=1.5&pid=1.7'
+            
+            # PERBAIKAN KRUSIAL: Escape ampersand untuk atribut XML
+            xml_img_url = html.escape(raw_img_url)
+            
+            # Format Deskripsi Pinterest
+            description = f'Beautiful {title} ideas for your home decor. Instant download high-quality printable wall art for your aesthetic room.'
+            
+            # Susun Item RSS
+            item = f'''
+            <item>
+                <title><![CDATA[{title}]]></title>
+                <link>{xml_link}</link>
+                <description><![CDATA[<img src=\"{raw_img_url}\" /><br/>{description}]]></description>
+                <enclosure url=\"{xml_img_url}\" type=\"image/jpeg\" length=\"102400\" />
+                <guid isPermaLink=\"true\">{xml_link}</guid>
+                <pubDate>{datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S +0000')}</pubDate>
+            </item>
+            '''
+            rss_items.append(item)
+
+        # 5. BUNGKUS DENGAN TAG RSS 2.0
+        rss_content = f'''<?xml version=\"1.0\" encoding=\"UTF-8\" ?>
+        <rss version=\"2.0\" xmlns:media=\"http://search.yahoo.com/mrss/\" xmlns:atom=\"http://www.w3.org/2005/Atom\" xmlns:content=\"http://purl.org/rss/1.0/modules/content/\">
+        <channel>
+            <title>DecorHouz - Printable Wall Art Gallery</title>
+            <link>{domain}</link>
+            <description>Aesthetic Printable Wall Art, Minimalist Posters, and Home Decor Inspiration.</description>
+            <language>en-us</language>
+            <atom:link href=\"{domain}/feed.xml\" rel=\"self\" type=\"application/rss+xml\" />
+            {''.join(rss_items)}
+        </channel>
+        </rss>'''
+
+        # 6. SIMPAN SEBAGAI feed.xml
+        with open('feed.xml', 'w', encoding='utf-8') as f:
+            f.write(rss_content)
+        "
+
+    - name: Commit and Push generated Feed
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add feed.xml
+        git commit -m "Auto-update Pinterest RSS Feed [skip ci]" || echo "No changes to commit"
+        git push
